@@ -1,8 +1,8 @@
 # MADock
 任意の映像と音声を結合するツール
 
-前提条件：ffmpegの導入
-（入手先→ https://ffmpeg.org）
+前提条件：ffmpegの導入  
+（入手先→ https://ffmpeg.orgら）
 
 ## 使用方法
 - batファイルからスクリプトを起動する（初回起動時はffmpeg.exe を指定する案内が表示されます）
