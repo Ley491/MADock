@@ -3,6 +3,7 @@
 
 前提条件：ffmpegの導入  
 （入手先→ https://ffmpeg.org ）
+テスト環境：Windows11
 
 ## 使用方法
 - batファイルからスクリプトを起動する  
