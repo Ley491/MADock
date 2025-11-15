@@ -2,7 +2,7 @@
 任意の映像と音声を結合するツール
 
 前提条件：ffmpegの導入  
-（入手先→ https://ffmpeg.org ）
+（入手先→ https://ffmpeg.org ）  
 テスト環境：Windows11
 
 ## 使用方法
