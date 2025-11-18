@@ -40,8 +40,19 @@ function Test-FFmpegPath($path) {
 
 # ffmpeg パスの読み込みまたは選択
 $config = Load-Config
+
 if ($config.ContainsKey("ffmpeg_path") -and (Test-FFmpegPath $config["ffmpeg_path"])) {
     $ffmpeg = $config["ffmpeg_path"]
+
+    # ffprobe.exe を同じフォルダから検出
+    $ffprobeCandidate = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($ffmpeg), "ffprobe.exe")
+    if (Test-Path $ffprobeCandidate) {
+        $ffprobe = $ffprobeCandidate
+    } else {
+        $ffprobe = $null
+        [System.Windows.Forms.MessageBox]::Show("ffprobe.exe が ffmpeg.exe と同じフォルダに見つかりません。ffprobeが必要な処理でエラーになる可能性があります。")
+    }
+
 } else {
     [System.Windows.Forms.MessageBox]::Show("このツールを使うには ffmpeg.exe の場所を指定する必要があります。")
 
@@ -49,9 +60,20 @@ if ($config.ContainsKey("ffmpeg_path") -and (Test-FFmpegPath $config["ffmpeg_pat
     $dialog.Title = "ffmpeg.exe を選択してください"
     $dialog.Filter = "ffmpeg.exe|ffmpeg.exe"
     $dialog.InitialDirectory = [Environment]::GetFolderPath("ProgramFiles")
+
     if ($dialog.ShowDialog() -eq "OK" -and (Test-FFmpegPath $dialog.FileName)) {
         $ffmpeg = $dialog.FileName
         Save-Config @{ ffmpeg_path = $ffmpeg }
+
+        # 🔽 ffprobe.exe を同じフォルダから検出
+        $ffprobeCandidate = [System.IO.Path]::Combine([System.IO.Path]::GetDirectoryName($ffmpeg), "ffprobe.exe")
+        if (Test-Path $ffprobeCandidate) {
+            $ffprobe = $ffprobeCandidate
+        } else {
+            $ffprobe = $null
+            [System.Windows.Forms.MessageBox]::Show("ffprobe.exe が ffmpeg.exe と同じフォルダに見つかりません。ffprobeが必要な処理でエラーになる可能性があります。")
+        }
+
     } else {
         [System.Windows.Forms.MessageBox]::Show("ffmpeg.exe が選択されなかったため、終了します。")
         exit
@@ -61,8 +83,8 @@ if ($config.ContainsKey("ffmpeg_path") -and (Test-FFmpegPath $config["ffmpeg_pat
 
 # UI設定
 
-$global:mp4_file = $null
-$global:wav_file = $null
+$global:video_file = $null
+$global:audio_file = $null
 $global:last_video_dir = $null
 $global:last_audio_dir = $null
 
@@ -96,21 +118,26 @@ $groupBox.Dock = 'Top'
 $groupBox.Height = 60
 
 $radioMP4 = New-Object System.Windows.Forms.RadioButton
-$radioMP4.Text = "MP4 のみ"
+$radioMP4.Text = "MP4"
 $radioMP4.Location = '20,20'
 $radioMP4.Checked = $true
 
 $radioMKV = New-Object System.Windows.Forms.RadioButton
-$radioMKV.Text = "MKV のみ"
+$radioMKV.Text = "MKV"
 $radioMKV.Location = '150,20'
 
-$radioBoth = New-Object System.Windows.Forms.RadioButton
-$radioBoth.Text = "MP4 + MKV"
-$radioBoth.Location = '280,20'
+$radioMOV = New-Object System.Windows.Forms.RadioButton
+$radioMOV.Text = "MOV"
+$radioMOV.Location = '280,20'
+
+# $radioBoth = New-Object System.Windows.Forms.RadioButton
+# $radioBoth.Text = "MP4 + MKV"
+# $radioBoth.Location = '400,20'
 
 $groupBox.Controls.Add($radioMP4)
 $groupBox.Controls.Add($radioMKV)
-$groupBox.Controls.Add($radioBoth)
+$groupBox.Controls.Add($radioMOV)
+# $groupBox.Controls.Add($radioBoth)
 $form.Controls.Add($groupBox)
 
 
@@ -153,7 +180,7 @@ $audioSelectButton.Add_Click({
     }
 
     if ($dialog.ShowDialog() -eq "OK") {
-        $global:wav_file = $dialog.FileName
+        $global:audio_file = $dialog.FileName
         $global:last_audio_dir = [System.IO.Path]::GetDirectoryName($dialog.FileName)
         $wavLabel.Text = "音声: " + [System.IO.Path]::GetFileName($dialog.FileName)
         $status.Text = "音声ファイルを指定しました。"
@@ -198,7 +225,7 @@ $videoSelectButton.Add_Click({
     }
 
     if ($dialog.ShowDialog() -eq "OK") {
-        $global:mp4_file = $dialog.FileName
+        $global:video_file = $dialog.FileName
         $global:last_video_dir = [System.IO.Path]::GetDirectoryName($dialog.FileName)
         $mp4Label.Text = "映像: " + [System.IO.Path]::GetFileName($dialog.FileName)
         $status.Text = "映像ファイルを指定しました。"
@@ -244,13 +271,47 @@ $status.TextAlign = 'MiddleCenter'
 $form.Controls.Add($status)
 
 
-# 出力完了後にフォルダを開く
+
+
+# 出力オプションパネル
+$outputOptionsPanel = New-Object System.Windows.Forms.Panel
+$outputOptionsPanel.Height = 20
+$outputOptionsPanel.Dock = 'Bottom'
+
+# 出力後フォルダを開くチェックボックス
 $openFolderCheck = New-Object System.Windows.Forms.CheckBox
 $openFolderCheck.Text = "出力完了後にフォルダを開く"
-$openFolderCheck.Dock = 'Bottom'
-$openFolderCheck.Height = 20
-$openFolderCheck.Checked = $false  # 初期状態（必要なら true）
-$form.Controls.Add($openFolderCheck)
+$openFolderCheck.Location = New-Object System.Drawing.Point(10, 2)
+$openFolderCheck.Size = '200,20'
+$openFolderCheck.Checked = $false   # 初期状態（必要なら true）
+
+# MP4同時出力チェックボックス（初期状態は非表示）
+$checkMP4Also = New-Object System.Windows.Forms.CheckBox
+$checkMP4Also.Text = "MP4同時出力"
+$checkMP4Also.Location = New-Object System.Drawing.Point(220, 2)
+$checkMP4Also.Size = '350,20'
+$checkMP4Also.Visible = $false
+$checkMP4Also.Enabled = $false
+
+# 表示制御（ラジオボタンに連動）
+$radioMKV.Add_CheckedChanged({
+    $checkMP4Also.Visible = $radioMKV.Checked
+    $checkMP4Also.Enabled = $radioMKV.Checked
+})
+$radioMOV.Add_CheckedChanged({
+    $checkMP4Also.Visible = $radioMOV.Checked
+    $checkMP4Also.Enabled = $radioMOV.Checked
+})
+$radioMP4.Add_CheckedChanged({
+    $checkMP4Also.Visible = $false
+    $checkMP4Also.Enabled = $false
+})
+
+# パネルに追加
+$outputOptionsPanel.Controls.Add($openFolderCheck)
+$outputOptionsPanel.Controls.Add($checkMP4Also)
+$form.Controls.Add($outputOptionsPanel)
+
 
 $spacerAboveRunButton = New-Object System.Windows.Forms.Label
 $spacerAboveRunButton.Height = 10
@@ -277,8 +338,8 @@ $resetButton.Text = "リセット"
 $resetButton.Dock = 'Bottom'
 $resetButton.Height = 30
 $resetButton.Add_Click({
-    $global:mp4_file = $null
-    $global:wav_file = $null
+    $global:video_file = $null
+    $global:audio_file = $null
     $mp4Label.Text = "映像: 未指定"
     $wavLabel.Text = "音声: 未指定"
     $status.Text = "ファイル指定をリセットしました。"
@@ -499,44 +560,289 @@ function ShowSettingsWindow {
 
     $settingsForm.ShowDialog()
 }
+# MP4用
+function GetAudioSpecs($inputPath) {
+    $specJson = "$env:TEMP\ffprobe_spec.json"
+    $args = "-v error -select_streams a:0 -show_entries stream=bit_rate,sample_rate,channels,sample_fmt -of json `"$inputPath`""
+    Start-Process -FilePath $ffprobe -ArgumentList $args -NoNewWindow -Wait -RedirectStandardOutput $specJson
 
+    if (-not (Test-Path $specJson)) {
+        return @{ bit_rate = "512k"; sample_rate = 48000; channels = 2; sample_fmt = "s16" }
+    }
+
+    $specData = Get-Content $specJson -Raw | ConvertFrom-Json
+    Remove-Item $specJson -Force
+
+    $bitrate = "512k"
+    $rawBitrate = "$($specData.streams[0].bit_rate)"  # ← 文字列として扱う
+
+    # 🔒 数値部分だけ抽出して処理
+    if ($rawBitrate -match '^\d+$') {
+        $bitrate = [math]::Round([int]$rawBitrate / 1000) + "k"
+    } elseif ($rawBitrate -match '^(\d+)[kK]$') {
+        $bitrate = "$($matches[1])k"
+    }
+
+    return @{
+        bit_rate    = $bitrate
+        sample_rate = $specData.streams[0].sample_rate
+        channels    = $specData.streams[0].channels
+        sample_fmt  = $specData.streams[0].sample_fmt
+    }
+}
+
+function AskAlacOrAac() {
+    $msg = "この音声は24bitまたは32bit floatです。AACの場合は16bitで変換されます。ALACの場合はは24bitで変換します"
+    $result = [System.Windows.Forms.MessageBox]::Show(
+        $msg,
+        "ALAC(再生機器制限あり)で出力しますか？",
+        [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+    return $result  # Yes = ALAC, No = AAC, Cancel = 中止
+}
+
+# WAVに変換（MOV用）
+function GetAudioSpecs($inputPath) {
+    $specJson = "$env:TEMP\ffprobe_spec.json"
+    $args = "-v error -select_streams a:0 -show_entries stream=bit_rate,sample_rate,channels,sample_fmt -of json `"$inputPath`""
+    Start-Process -FilePath $ffprobe -ArgumentList $args -NoNewWindow -Wait -RedirectStandardOutput $specJson
+
+    if (-not (Test-Path $specJson)) {
+        return @{ bit_rate = "512k"; sample_rate = 48000; channels = 2; sample_fmt = "s16" }
+    }
+
+    $specData = Get-Content $specJson -Raw | ConvertFrom-Json
+    Remove-Item $specJson -Force
+
+    $bitrate = "512k"
+    $rawBitrate = "$($specData.streams[0].bit_rate)"  # ← 文字列として扱う
+
+    # 🔒 数値部分だけ抽出して処理（例: "512000" → "512k"）
+    if ($rawBitrate -match '^\d+$') {
+        $kbps = [math]::Round([double]$rawBitrate / 1000)
+        $bitrate = "$kbps" + "k"
+    } elseif ($rawBitrate -match '^(\d+)[kK]$') {
+        $bitrate = "$($matches[1])k"
+    }
+
+    return @{
+        bit_rate    = $bitrate
+        sample_rate = $specData.streams[0].sample_rate
+        channels    = $specData.streams[0].channels
+        sample_fmt  = $specData.streams[0].sample_fmt
+    }
+}
+function GetCodecNameFromAudio($inputPath) {
+    if (-not $ffprobe -or -not (Test-Path $ffprobe)) {
+        return "unknown"
+    }
+
+    $codecJson = "$env:TEMP\ffprobe_codec.json"
+    $args = "-v error -select_streams a:0 -show_entries stream=codec_name -of json `"$inputPath`""
+    Start-Process -FilePath $ffprobe -ArgumentList $args -NoNewWindow -Wait -RedirectStandardOutput $codecJson
+
+    if (-not (Test-Path $codecJson)) {
+        return "unknown"
+    }
+
+    $data = Get-Content $codecJson -Raw | ConvertFrom-Json
+    Remove-Item $codecJson -Force
+
+    return $data.streams[0].codec_name
+}
+
+function ConvertToWavIfNeeded($inputPath, $baseName) {
+    if (-not $ffprobe -or -not (Test-Path $ffprobe)) {
+        [System.Windows.Forms.MessageBox]::Show("ffprobe.exe のパスが未設定または無効です。")
+        return $inputPath
+    }
+
+    $tempWav = "$env:TEMP\$baseName`_converted.wav"
+    $finalAudio = $inputPath
+
+    $audioExt = [System.IO.Path]::GetExtension($inputPath).ToLower()
+
+    # ffprobeでコーデック名を取得（JSON形式）
+    $codecJson = "$env:TEMP\ffprobe_codec.json"
+    $codecArgs = "-v error -select_streams a:0 -show_entries stream=codec_name -of json `"$inputPath`""
+    Start-Process -FilePath $ffprobe -ArgumentList $codecArgs -NoNewWindow -Wait -RedirectStandardOutput $codecJson
+
+    if (-not (Test-Path $codecJson)) {
+        return $inputPath
+    }
+
+    $codecData = Get-Content $codecJson -Raw | ConvertFrom-Json
+    Remove-Item $codecJson -Force
+    $codecName = $codecData.streams[0].codec_name
+
+    if ($codecName -eq "flac") {
+        # FLAC → WAV（仕様維持）
+        $specJson = "$env:TEMP\ffprobe_spec.json"
+        $specArgs = "-v error -select_streams a:0 -show_entries stream=sample_rate,channels,sample_fmt -of json `"$inputPath`""
+        Start-Process -FilePath $ffprobe -ArgumentList $specArgs -NoNewWindow -Wait -RedirectStandardOutput $specJson
+
+        if (-not (Test-Path $specJson)) {
+            return $inputPath
+        }
+
+        $specData = Get-Content $specJson -Raw | ConvertFrom-Json
+        Remove-Item $specJson -Force
+
+        $sampleRate = $specData.streams[0].sample_rate
+        $channels   = $specData.streams[0].channels
+        $sampleFmt  = $specData.streams[0].sample_fmt
+
+        switch ($sampleFmt) {
+            "s16" { $pcmCodec = "pcm_s16le" }
+            "s24" { $pcmCodec = "pcm_s24le" }
+            "s32" { $pcmCodec = "pcm_s32le" }
+            "flt" { $pcmCodec = "pcm_f32le" }
+            default { $pcmCodec = "pcm_s16le" }
+        }
+
+        $ffmpegArgs = "-i `"$inputPath`" -ar $sampleRate -ac $channels -sample_fmt flt -c:a pcm_f32le -f wav `"$tempWav`""
+        Start-Process -FilePath $ffmpeg -ArgumentList $ffmpegArgs -NoNewWindow -Wait
+        $finalAudio = $tempWav
+    }
+    elseif ($codecName -ne "alac" -and $audioExt -ne ".wav") {
+        # その他（MP3など）→ WAV変換（安全な16bit）
+        $ffmpegArgs = "-i `"$inputPath`" -c:a pcm_s16le `"$tempWav`""
+        Start-Process -FilePath $ffmpeg -ArgumentList $ffmpegArgs -NoNewWindow -Wait
+        $finalAudio = $tempWav
+    }
+
+    return $finalAudio
+}
 
 # 処理関数（Start-Process構造）
 function TryProcess {
-    if ($global:mp4_file -and $global:wav_file) {
-        $base = [System.IO.Path]::GetFileNameWithoutExtension($global:mp4_file)
+    if ($global:video_file -and $global:audio_file) {
+        $base = [System.IO.Path]::GetFileNameWithoutExtension($global:video_file)
 
         # 出力先パスのセーフティ処理
         $outputPath = $config["output_path"]
         if ([string]::IsNullOrWhiteSpace($outputPath) -or -not (Test-Path $outputPath)) {
             $outputPath = $PSScriptRoot
         }
-
-        if ($radioMP4.Checked -or $radioBoth.Checked) {
+        
+        # MP4出力
+        # if ($radioMP4.Checked -or $radioBoth.Checked) {     # ラジオ式同時出力処理
+        if ($radioMP4.Checked -or $checkMP4Also.Checked) {
             $suffix = if ($config["use_suffix"] -eq "dock") { "_dock" } else { "" }
             $outputMP4 = GetSafeOutputPath("$outputPath\$base$suffix.mp4")
-            # $outputMP4 = GetSafeOutputPath("$outputPath\$base`_dock.mp4")
             $durationOption = if ($config["duration_mode"] -eq "trim") { "-shortest" } else { "" }
-            $argsMP4 = "-i `"$global:mp4_file`" -i `"$global:wav_file`" -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 512k $durationOption `"$outputMP4`""
-            # $argsMP4 = "-i `"$global:mp4_file`" -i `"$global:wav_file`" -map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 512k `"$outputMP4`""
+
+            # 🔁 FLACやALACなどをWAVに変換（MP4はPCM非対応のため）
+            $finalAudio = ConvertToWavIfNeeded $global:audio_file $base
+            $specs = GetAudioSpecs $finalAudio
+            $sample_fmt = $specs.sample_fmt
+            $samplerate = $specs.sample_rate
+            $channels = $specs.channels
+
+            # 🔍 精度判定 → ALAC選択ポップアップ
+            $useAlac = $false
+            if ($sample_fmt -eq "s24" -or $sample_fmt -eq "flt") {
+                $choice = AskAlacOrAac
+                if ($choice -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                    return
+                } elseif ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    $useAlac = $true
+                }
+            }
+
+            # 🔁 ALAC変換（必要なら）
+            if ($useAlac) {
+                $tempAlac = "$env:TEMP\$base`_alac.m4a"
+                $ffmpegArgs = "-i `"$finalAudio`" -c:a alac `"$tempAlac`""
+                Start-Process -FilePath $ffmpeg -ArgumentList $ffmpegArgs -NoNewWindow -Wait
+                $audioInput = $tempAlac
+                $audioCodec = "copy"
+            } else {
+                $audioInput = $finalAudio
+                $audioCodec = "aac"
+            }
+
+            $bitrate = switch ($sample_fmt) {
+                "s16" { "192k" }
+                "s24" { "384k" }
+                "flt" { "512k" }
+                default { "256k" }
+            }
+
+            $argsMP4 = "-i `"$global:video_file`" -i `"$audioInput`" -map 0:v:0 -map 1:a:0 -c:v copy -c:a $audioCodec -b:a $bitrate -ar $samplerate -ac $channels $durationOption `"$outputMP4`""
             try {
                 Start-Process -FilePath $ffmpeg -ArgumentList $argsMP4 -NoNewWindow -Wait
                 [System.Windows.Forms.MessageBox]::Show("MP4処理完了: $outputMP4")
             } catch {
                 [System.Windows.Forms.MessageBox]::Show("MP4処理中にエラー:\n$($_.Exception.Message)")
             }
+
+            # 🧹 一時ファイル削除
+            if (($finalAudio -ne $global:audio_file) -and (Test-Path $finalAudio)) {
+                Remove-Item $finalAudio -Force
+            }
+            if ($useAlac -and (Test-Path $tempAlac)) {
+                Remove-Item $tempAlac -Force
+            }
         }
 
+
+        # MKV出力（回転してしまう可能性がある）
         if ($radioMKV.Checked -or $radioBoth.Checked) {
             $suffix = if ($config["use_suffix"] -eq "dock") { "_dock" } else { "" }
             $outputMKV = GetSafeOutputPath("$outputPath\$base$suffix.mkv")
             $durationOption = if ($config["duration_mode"] -eq "trim") { "-shortest" } else { "" }
-            $argsMKV = "-i `"$global:mp4_file`" -i `"$global:wav_file`" -map 0:v -map 1:a -c:v copy -c:a copy $durationOption `"$outputMKV`""
+            $argsMKV = "-i `"$global:video_file`" -i `"$global:audio_file`" -map 0:v -map 1:a -c:v copy -c:a copy $durationOption `"$outputMKV`""
             try {
                 Start-Process -FilePath $ffmpeg -ArgumentList $argsMKV -NoNewWindow -Wait
                 [System.Windows.Forms.MessageBox]::Show("MKV処理完了: $outputMKV")
             } catch {
                 [System.Windows.Forms.MessageBox]::Show("MKV処理中にエラー:\n$($_.Exception.Message)")
+            }
+        }
+
+        # MOV出力（FLACはWAVに変換してから出力）
+        if ($radioMOV.Checked) {
+            $suffix = if ($config["use_suffix"] -eq "dock") { "_dock" } else { "" }
+            $outputMOV = GetSafeOutputPath("$outputPath\$base$suffix.mov")
+            $durationOption = if ($config["duration_mode"] -eq "trim") { "-shortest" } else { "" }
+
+            # 🔍 FLAC確認ポップアップ
+            $codecName = GetCodecNameFromAudio $global:audio_file
+            if ($codecName -eq "flac") {
+                $confirm = [System.Windows.Forms.MessageBox]::Show(
+                    "FLAC音声はMOV出力に対応していないため、可能であれば、最初からWAV形式で出力された音声ファイルの使用を推奨します。WAVに変換しますか？",
+                    "FLAC → WAV 変換確認（再生機器制限あり）",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                )
+                if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
+                    return
+                }
+            }
+
+            # 🔁 WAV変換（必要なら）
+            $finalAudio = ConvertToWavIfNeeded $global:audio_file $base
+            $specs = GetAudioSpecs $finalAudio
+            $samplerate = $specs.sample_rate
+            $channels = $specs.channels
+
+            $argsMOV = "-i `"$global:video_file`" -i `"$finalAudio`" -map 0:v -map 1:a -c:v copy -c:a copy -ar $samplerate -ac $channels $durationOption `"$outputMOV`""
+            try {
+                Start-Process -FilePath $ffmpeg -ArgumentList $argsMOV -NoNewWindow -Wait
+                [System.Windows.Forms.MessageBox]::Show("MOV処理完了: $outputMOV")
+            } catch {
+                [System.Windows.Forms.MessageBox]::Show("MOV処理中にエラー:\n$($_.Exception.Message)")
+            }
+
+            # 🧹 一時ファイル削除
+            if ($finalAudio -ne $global:audio_file -and (Test-Path $finalAudio)) {
+                try {
+                    Remove-Item -Path $finalAudio -Force
+                } catch {
+                    Write-Host "一時ファイル削除失敗: $($_.Exception.Message)"
+                }
             }
         }
 
@@ -583,12 +889,12 @@ $form.Add_DragDrop({
     $files = $_.Data.GetData("FileDrop")
     foreach ($file in $files) {
         if ($file.ToLower().EndsWith(".mp4")) {
-            $global:mp4_file = $file
+            $global:video_file = $file
             $global:last_video_dir = [System.IO.Path]::GetDirectoryName($file)
             $mp4Label.Text = "映像: " + [System.IO.Path]::GetFileName($file)
             $status.Text = "映像ファイルを指定しました。"
         } elseif ($file.ToLower() -match "\.(wav|flac|m4a|alac|caf|ape|wv)$") {
-            $global:wav_file = $file
+            $global:audio_file = $file
             $global:last_audio_dir = [System.IO.Path]::GetDirectoryName($file)
             $wavLabel.Text = "音声: " + [System.IO.Path]::GetFileName($file)
             $status.Text = "音声ファイルを指定しました。"
