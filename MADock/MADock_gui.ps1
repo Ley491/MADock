@@ -1,4 +1,4 @@
-﻿# MADock GUI スクリプト
+# MADock GUI スクリプト(MADock_gui.ps1)
 # このスクリプトは ffmpeg.exe を用いて任意の映像と音声を結合するツールです。
 # config.txt の設定でffmpeg.exe の場所を指定して動作します（GUIから設定可能）。
 
@@ -255,6 +255,27 @@ $outputOptionsPanel.Controls.Add($sameFolderCheck)
 $outputOptionsPanel.Controls.Add($openFolderCheck)
 $outputOptionsPanel.Controls.Add($checkMP4Also)
 $form.Controls.Add($outputOptionsPanel)
+
+
+# 設定ファイルからUI状態を復元（前回の設定を引き継ぐ）
+$sameFolderCheck.Checked = ($global:config["output_to_same_folder"] -eq "true")
+$openFolderCheck.Checked = ($global:config["open_folder_after_export"] -eq "true")
+$checkMP4Also.Checked    = ($global:config["mp4_also_export"] -eq "true")
+
+switch ($global:config["selected_output_format"]) {
+    "mp4"  { $radioMP4.Checked  = $true }
+    "mkv"  { $radioMKV.Checked  = $true }
+    "mov"  { $radioMOV.Checked  = $true }
+}
+
+# ラジオボタン状態に応じて MP4同時出力チェックの表示を更新
+if ($radioMKV.Checked -or $radioMOV.Checked) {
+    $checkMP4Also.Visible = $true
+    $checkMP4Also.Enabled = $true
+} else {
+    $checkMP4Also.Visible = $false
+    $checkMP4Also.Enabled = $false
+}
 
 
 $spacerAboveRunButton = New-Object System.Windows.Forms.Label
