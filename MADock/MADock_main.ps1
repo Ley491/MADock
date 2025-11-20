@@ -1,4 +1,4 @@
-﻿# MADock 処理関数ロジック スクリプト(MADock_main.ps1)
+# MADock 処理関数ロジック スクリプト(MADock_main.ps1)
 
 # 音声ファイル変換（FLAC→WAV変換）
 function ConvertFlacToWav($inputPath, $baseName) {
@@ -173,7 +173,7 @@ function TryProcess {
         if ($radioMP4.Checked -or $checkMP4Also.Checked) {
             $mp4Success = ProcessMP4 $base $outputPath
         }   # MP4
-        if ($radioMKV.Checked -or $radioBoth.Checked) {
+        if ($radioMKV.Checked) {
             $mkvSuccess = ProcessMKV $base $outputPath
         }   # MKV
         if ($radioMOV.Checked) {
@@ -189,6 +189,24 @@ function TryProcess {
         $status.Text = "処理完了。ファイルを確認してください。"
         if ($openFolderCheck.Checked -and (Test-Path $outputPath)) {
             Start-Process -FilePath "explorer.exe" -ArgumentList "`"$outputPath`""
+        }
+
+        # 実行時のUI状態を config.txt に保存
+        $selectedFormat = if ($radioMP4.Checked) {
+            "mp4"
+        } elseif ($radioMKV.Checked) {
+            "mkv"
+        } elseif ($radioMOV.Checked) {
+            "mov"
+        } else {
+            ""
+        }
+
+        Save-Config @{
+            open_folder_after_export = $openFolderCheck.Checked.ToString().ToLower()
+            output_to_same_folder    = $sameFolderCheck.Checked.ToString().ToLower()
+            mp4_also_export          = $checkMP4Also.Checked.ToString().ToLower()
+            selected_output_format   = $selectedFormat
         }
 
         # 一時ファイル削除
